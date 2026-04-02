@@ -1,4 +1,3 @@
-
 import {
     setPPHeaders,
     unsetPPHeaders,
@@ -14,7 +13,7 @@ import {
     unsetLocaRedirectorHeader,
     selfRemovingUnsetRefererHeadersListener,
     setHTMLIndexRedirector,
-    unsetHTMLIndexRedirector
+    unsetHTMLIndexRedirector,
 } from './headers.js'
 
 import {
@@ -65,7 +64,7 @@ async function checkingDoubleSpendListener(details) {
             debug_log(`> loading a new token for ${endpoint}`)
         }
         // a token was double spent, load the next one
-        await setPPHeaders(endpoint);
+        await setPPHeaders(endpoint, currentTabIds);
         /*
          * The status at this line is:
          * - an error page is shown (or no results displayed in case of a /socket/ request failing)
@@ -111,7 +110,14 @@ async function checkingDoubleSpendListener(details) {
     }
 }
 
-async function setEnabled() {
+// Track active webRequest listeners so setDisabled can remove them regardless of mode.
+let activeSendHeadersListener = null;
+let activeCompletedListener = null;
+// Track current tabIds so double-spend recovery uses the correct scope.
+let currentTabIds = [];
+
+async function setEnabled(tabIds = []) {
+    currentTabIds = tabIds;
     if (VERBOSE) {
         debug_log("setEnabled")
     }
@@ -120,7 +126,7 @@ async function setEnabled() {
     if (n_tokens <= 0) {
         try {
             await get_kagi_session();
-            await genTokens();
+            await genTokens(tabIds);
         } catch (ex) {
             await logError(`${ex}`);
             await browser.storage.local.set({ 'enabled': false })
@@ -130,26 +136,29 @@ async function setEnabled() {
         }
     }
     // enable Privacy Pass mode
-    await setRefererRules();
-    await setAntiFingerprintingRules();
-    await setLocaRedirectorHeader();
-    await setHTMLIndexRedirector();
+    await setRefererRules(tabIds);
+    await setAntiFingerprintingRules(tabIds);
+    await setLocaRedirectorHeader(tabIds);
+    await setHTMLIndexRedirector(tabIds);
     for (let i = 0; i < REDEMPTION_ENDPOINTS.length; i++) {
         let endpoint = REDEMPTION_ENDPOINTS[i];
-        await setPPHeaders(endpoint);
+        await setPPHeaders(endpoint, tabIds);
     }
+    const tabSet = new Set(tabIds);
+    activeSendHeadersListener = tabIds.length > 0
+        ? async (details) => { if (tabSet.has(details.tabId)) await setPPHeadersListener(details, [...tabSet]); }
+        : setPPHeadersListener;
+    activeCompletedListener = tabIds.length > 0
+        ? async (details) => { if (tabSet.has(details.tabId)) await checkingDoubleSpendListener(details); }
+        : checkingDoubleSpendListener;
     browser.webRequest.onSendHeaders.addListener(
-        setPPHeadersListener,
-        {
-            urls: WEBREQUEST_REDEMPTION_ENDPOINTS
-        },
+        activeSendHeadersListener,
+        { urls: WEBREQUEST_REDEMPTION_ENDPOINTS },
         []
     )
     browser.webRequest.onCompleted.addListener(
-        checkingDoubleSpendListener,
-        {
-            urls: WEBREQUEST_REDEMPTION_ENDPOINTS
-        },
+        activeCompletedListener,
+        { urls: WEBREQUEST_REDEMPTION_ENDPOINTS },
         []
     )
     await update_extension_icon(true);
@@ -159,6 +168,7 @@ async function setDisabled() {
     if (VERBOSE) {
         debug_log("setDisabled")
     }
+    currentTabIds = [];
     await unsetAntiFingerprintingRules();
     await unsetLocaRedirectorHeader();
     await unsetHTMLIndexRedirector();
@@ -166,17 +176,36 @@ async function setDisabled() {
         let endpoint = REDEMPTION_ENDPOINTS[i];
         await unsetPPHeaders(endpoint);
     }
-    browser.webRequest.onSendHeaders.removeListener(setPPHeadersListener);
-    browser.webRequest.onCompleted.removeListener(checkingDoubleSpendListener);
+    // Clear any session rules left over from incognito-only mode.
+    // (tabIds conditions only work with session rules, not dynamic rules.)
+    const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
+    if (sessionRules.length > 0) {
+        await chrome.declarativeNetRequest.updateSessionRules({
+            addRules: [],
+            removeRuleIds: sessionRules.map(r => r.id)
+        });
+    }
+    if (activeSendHeadersListener) {
+        browser.webRequest.onSendHeaders.removeListener(activeSendHeadersListener);
+        activeSendHeadersListener = null;
+    }
+    if (activeCompletedListener) {
+        browser.webRequest.onCompleted.removeListener(activeCompletedListener);
+        activeCompletedListener = null;
+    }
     browser.webRequest.onCompleted.addListener(
         selfRemovingUnsetRefererHeadersListener,
         { urls: ["<all_urls>"] },
         ["responseHeaders"]
     )
-    await update_extension_icon(false);
+}
+
+function getCurrentTabIds() {
+    return currentTabIds;
 }
 
 export {
     setEnabled,
-    setDisabled
+    setDisabled,
+    getCurrentTabIds
 };

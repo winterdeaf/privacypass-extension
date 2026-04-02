@@ -12,7 +12,9 @@ import {
 
 import {
   set_enabled,
-  is_enabled
+  is_enabled,
+  set_incognito_only,
+  is_incognito_only
 } from './enable_toggle.js'
 
 // ---- UI elements
@@ -24,6 +26,7 @@ const status_msg_color = document.querySelector("#status-message-color")
 const debug_available_tokens_div = document.querySelector("#available-tokens")
 const available_tokens_div = document.querySelector("#available-tokens-count")
 const enabled_checkbox = document.querySelector("#kagipp-enabled")
+const incognito_only_checkbox = document.querySelector("#kagipp-incognito-only")
 const settingsbtn = document.querySelector("#kagipp-settings")
 const lowtokencountdiv = document.querySelector("#low-token-area")
 const gentokensbtn = document.querySelector("#kagipp-generate-tokens")
@@ -129,9 +132,14 @@ if (enabled_checkbox) {
   enabled_checkbox.addEventListener("change", set_enabled)
 }
 
+if (incognito_only_checkbox) {
+  incognito_only_checkbox.addEventListener("change", set_incognito_only)
+}
+
 (async () => {
   // try reading right away
   await is_enabled();
+  await is_incognito_only();
   // add CSS transition style
   setTimeout(() => {
     let sheet = window.document.styleSheets[0];
@@ -141,6 +149,7 @@ if (enabled_checkbox) {
   setTimeout(() => {
     setIntervalAndFire(async () => {
       await is_enabled();
+      await is_incognito_only();
     }, 1000);
   }, 1000)
 })()

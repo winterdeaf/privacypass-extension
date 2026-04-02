@@ -55,6 +55,13 @@ import {
 // --- general utilities
 
 
+function addTabIds(rule, tabIds) {
+    if (tabIds && tabIds.length > 0) {
+        rule.condition.tabIds = tabIds;
+    }
+    return rule;
+}
+
 function dropHeaderRule(headerKey, endpoint, ruleId, rulePriority, allResourceTypes = false) {
     let resourceTypes = ["main_frame", "sub_frame", "xmlhttprequest"];
     if (allResourceTypes) {
@@ -112,7 +119,7 @@ function range(size, startAt = 0) {
     return [...Array(size).keys()].map(i => i + startAt);
 }
 
-function compileHeaderRuleset(ruleset, offset, ruleEndpointPath = "", rulePriority = 1, subDomain = "") {
+function compileHeaderRuleset(ruleset, offset, ruleEndpointPath = "", rulePriority = 1, subDomain = "", tabIds = []) {
     let add_rules = [];
     let nrules = offset; // rule separation
     const full_domain_port = (subDomain != "") ? `${subDomain}.${DOMAIN_PORT}` : DOMAIN_PORT;
@@ -126,11 +133,11 @@ function compileHeaderRuleset(ruleset, offset, ruleEndpointPath = "", rulePriori
     for (const key in ruleset) {
         const val = ruleset[key];
         if (val) {
-            add_rules.push(editHeaderRule(key, val, endpoint, ++nrules, rulePriority, true));
-            add_rules.push(editHeaderRule(key, val, onion_endpoint, ++nrules, rulePriority, true));
+            add_rules.push(addTabIds(editHeaderRule(key, val, endpoint, ++nrules, rulePriority, true), tabIds));
+            add_rules.push(addTabIds(editHeaderRule(key, val, onion_endpoint, ++nrules, rulePriority, true), tabIds));
         } else {
-            add_rules.push(dropHeaderRule(key, endpoint, ++nrules, rulePriority, true));
-            add_rules.push(dropHeaderRule(key, onion_endpoint, ++nrules, rulePriority, true));
+            add_rules.push(addTabIds(dropHeaderRule(key, endpoint, ++nrules, rulePriority, true), tabIds));
+            add_rules.push(addTabIds(dropHeaderRule(key, onion_endpoint, ++nrules, rulePriority, true), tabIds));
         }
     }
 
@@ -142,12 +149,16 @@ function compileHeaderRuleset(ruleset, offset, ruleEndpointPath = "", rulePriori
     return rules;
 };
 
-async function setHeaderRuleset(ruleset, offset, ruleEndpointPath = "", rulePriority = 1, subDomain = "") {
-    const rules = compileHeaderRuleset(ruleset, offset, ruleEndpointPath, rulePriority, subDomain);
+async function setHeaderRuleset(ruleset, offset, ruleEndpointPath = "", rulePriority = 1, subDomain = "", tabIds = []) {
+    const rules = compileHeaderRuleset(ruleset, offset, ruleEndpointPath, rulePriority, subDomain, tabIds);
     if (VERBOSE) {
         debug_log(`setHeaderRuleset: ${rules}`)
     }
-    await browser.declarativeNetRequest.updateDynamicRules(rules)
+    if (tabIds.length > 0) {
+        await browser.declarativeNetRequest.updateSessionRules(rules);
+    } else {
+        await browser.declarativeNetRequest.updateDynamicRules(rules);
+    }
 }
 
 async function unsetHeaderRuleset(ruleset, offset) {
@@ -170,8 +181,8 @@ async function unsetHeaderRuleset(ruleset, offset) {
  * 3. Opens another Kagi.com page, leaking "https://kagi.com/search?q=<sensitive query>" via its Referer (or equivalent) header
 */
 
-async function setRefererRules() {
-    return await setHeaderRuleset(REFERER_RULESET, REFERER_RULES_OFFSET)
+async function setRefererRules(tabIds = []) {
+    return await setHeaderRuleset(REFERER_RULESET, REFERER_RULES_OFFSET, "", 1, "", tabIds)
 }
 
 async function unsetRefererRules() {
@@ -196,16 +207,16 @@ async function selfRemovingUnsetRefererHeadersListener(details) {
 
 // --- general deanonymising header removal
 
-async function setAntiFingerprintingRules() {
-    await setHeaderRuleset(ANONYMIZING_RULESET, ANONYMIZING_RULES_OFFSET)
+async function setAntiFingerprintingRules(tabIds = []) {
+    await setHeaderRuleset(ANONYMIZING_RULESET, ANONYMIZING_RULES_OFFSET, "", 1, "", tabIds)
     // just for /socket/* endpoints, force Accept: "text/event-stream"
-    await setHeaderRuleset({ Accept: "text/event-stream" }, ACCEPT_EVENT_STREAM_OFFSET, "socket/", 2);
+    await setHeaderRuleset({ Accept: "text/event-stream" }, ACCEPT_EVENT_STREAM_OFFSET, "socket/", 2, "", tabIds);
     // support for quick answer and summarize document from search results page
-    await setHeaderRuleset({ Accept: "application/vnd.kagi.stream" }, ACCEPT_QUICK_ANSWER_OFFSET, "mother/context", 2);
-    await setHeaderRuleset({ Accept: "application/vnd.kagi.stream" }, ACCEPT_QUICK_ANSWER_DOC_OFFSET, "mother/summarize_document", 2);
+    await setHeaderRuleset({ Accept: "application/vnd.kagi.stream" }, ACCEPT_QUICK_ANSWER_OFFSET, "mother/context", 2, "", tabIds);
+    await setHeaderRuleset({ Accept: "application/vnd.kagi.stream" }, ACCEPT_QUICK_ANSWER_DOC_OFFSET, "mother/summarize_document", 2, "", tabIds);
     // just for translate.kagi.com/?/translate/ to accept "application/json" and turnstile to */*
-    await setHeaderRuleset({ Accept: "application/json" }, ACCEPT_TRANSLATE_JSON_OFFSET, "?/translate", 2, "translate");
-    await setHeaderRuleset({ Accept: "*/*" }, ACCEPT_TRANSLATE_TURSNTILE_OFFSET, "api/auth/turnstile", 2, "translate");
+    await setHeaderRuleset({ Accept: "application/json" }, ACCEPT_TRANSLATE_JSON_OFFSET, "?/translate", 2, "translate", tabIds);
+    await setHeaderRuleset({ Accept: "*/*" }, ACCEPT_TRANSLATE_TURSNTILE_OFFSET, "api/auth/turnstile", 2, "translate", tabIds);
 }
 
 
@@ -221,7 +232,7 @@ async function unsetAntiFingerprintingRules() {
 
 // --- sets HTTP Authorization header
 
-function compileHTTPAuthorizationRuleset(endpoint, token_tuple) {
+function compileHTTPAuthorizationRuleset(endpoint, token_tuple, tabIds = []) {
     const [token, token_date] = token_tuple;
 
     const offset = HTTP_AUTHORIZATION_ID[endpoint];
@@ -229,8 +240,8 @@ function compileHTTPAuthorizationRuleset(endpoint, token_tuple) {
     let nrules = offset; // rule separation
 
     // NOTE: if you increase the number of rules below this line, match this with the constant factor in `anonymization.js`
-    add_rules.push(editHeaderRule("X-Kagi-PrivacyPass-Client", "true", endpoint, ++nrules, 2));
-    add_rules.push(editHeaderRule("Authorization", `PrivateToken token="${token}"`, endpoint, ++nrules, 2));
+    add_rules.push(addTabIds(editHeaderRule("X-Kagi-PrivacyPass-Client", "true", endpoint, ++nrules, 2), tabIds));
+    add_rules.push(addTabIds(editHeaderRule("Authorization", `PrivateToken token="${token}"`, endpoint, ++nrules, 2), tabIds));
 
     const rules = {
         addRules: add_rules,
@@ -240,7 +251,7 @@ function compileHTTPAuthorizationRuleset(endpoint, token_tuple) {
     return rules;
 }
 
-async function setLocaRedirectorHeader() {
+async function setLocaRedirectorHeader(tabIds = []) {
     if (VERBOSE) {
         debug_log(`setLocaRedirectorHeader`)
     }
@@ -261,13 +272,15 @@ async function setLocaRedirectorHeader() {
 
     // We write the redirect rule using regexes. The URLTransform approach does not seem to behave properly.
     // this should only be applied for the /search endpoint, since this is the one used for the Kagi session link
+    const tabIdsCondition = tabIds.length > 0 ? { tabIds } : {};
     const rules = {
         addRules: [{
             id: LOCAL_REDIRECTOR_ID,
             priority: 1,
             condition: {
                 regexFilter: "^https?://kagi.com/search/?\\??(.*)[\\?|&](token=[^&]*)(.*)$", // match search queries including a `token` get variable
-                resourceTypes: ["main_frame", "sub_frame", "xmlhttprequest"]
+                resourceTypes: ["main_frame", "sub_frame", "xmlhttprequest"],
+                ...tabIdsCondition
             },
             action: {
                 type: "redirect",
@@ -280,7 +293,8 @@ async function setLocaRedirectorHeader() {
             priority: 1,
             condition: {
                 regexFilter: "^https?://kagi2pv5bdcxxqla5itjzje2cgdccuwept5ub6patvmvn3qgmgjd6vid.onion/search/?\\??(.*)[\\?|&](token=[^&]*)(.*)$", // match search queries including a `token` get variable
-                resourceTypes: ["main_frame", "sub_frame", "xmlhttprequest"]
+                resourceTypes: ["main_frame", "sub_frame", "xmlhttprequest"],
+                ...tabIdsCondition
             },
             action: {
                 type: "redirect",
@@ -292,7 +306,11 @@ async function setLocaRedirectorHeader() {
         removeRuleIds: [LOCAL_REDIRECTOR_ID, ONION_LOCAL_REDIRECTOR_ID]
     };
 
-    await browser.declarativeNetRequest.updateDynamicRules(rules);
+    if (tabIds.length > 0) {
+        await browser.declarativeNetRequest.updateSessionRules(rules);
+    } else {
+        await browser.declarativeNetRequest.updateDynamicRules(rules);
+    }
 }
 
 async function unsetLocaRedirectorHeader() {
@@ -305,17 +323,19 @@ async function unsetLocaRedirectorHeader() {
     });
 }
 
-async function setHTMLIndexRedirector() {
+async function setHTMLIndexRedirector(tabIds = []) {
     if (VERBOSE) {
         debug_log(`setHTMLIndexRedirector`)
     }
+    const tabIdsCondition = tabIds.length > 0 ? { tabIds } : {};
     const rules = {
         addRules: [{
             id: KAGI_HTML_SLASH_REDIRECT,
             priority: 1,
             condition: {
                 urlFilter: `||${DOMAIN_PORT}/html/|`,
-                resourceTypes: ["main_frame", "sub_frame"]
+                resourceTypes: ["main_frame", "sub_frame"],
+                ...tabIdsCondition
             },
             action: {
                 type: "redirect",
@@ -328,7 +348,8 @@ async function setHTMLIndexRedirector() {
             priority: 1,
             condition: {
                 urlFilter: `||${ONION_DOMAIN_PORT}/html/|`,
-                resourceTypes: ["main_frame", "sub_frame"]
+                resourceTypes: ["main_frame", "sub_frame"],
+                ...tabIdsCondition
             },
             action: {
                 type: "redirect",
@@ -340,7 +361,11 @@ async function setHTMLIndexRedirector() {
         removeRuleIds: [KAGI_HTML_SLASH_REDIRECT, ONION_HTML_SLASH_REDIRECT]
     };
 
-    await browser.declarativeNetRequest.updateDynamicRules(rules);
+    if (tabIds.length > 0) {
+        await browser.declarativeNetRequest.updateSessionRules(rules);
+    } else {
+        await browser.declarativeNetRequest.updateDynamicRules(rules);
+    }
 }
 
 async function unsetHTMLIndexRedirector() {
@@ -353,13 +378,17 @@ async function unsetHTMLIndexRedirector() {
     });
 }
 
-async function setAuthorizationHeader(endpoint, token_tuple) {
+async function setAuthorizationHeader(endpoint, token_tuple, tabIds = []) {
     if (VERBOSE) {
-        debug_log(`[${endpoint}] ${token_tuple[0].substring(0, 32)}`)
+        debug_log(`[${endpoint}] ${token_tuple[0].substring(0, 32)} tabIds=${JSON.stringify(tabIds)}`)
     }
     await unsetNoTokensRedirect(endpoint);
-    const rules = compileHTTPAuthorizationRuleset(endpoint, token_tuple);
-    await browser.declarativeNetRequest.updateDynamicRules(rules);
+    const rules = compileHTTPAuthorizationRuleset(endpoint, token_tuple, tabIds);
+    if (tabIds.length > 0) {
+        await browser.declarativeNetRequest.updateSessionRules(rules);
+    } else {
+        await browser.declarativeNetRequest.updateDynamicRules(rules);
+    }
     // load the token tuple in local storage
     let { loaded_tokens } = await browser.storage.local.get({ "loaded_tokens": {} })
     loaded_tokens[endpoint] = token_tuple

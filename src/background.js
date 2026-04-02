@@ -24,7 +24,8 @@ import {
 
 import {
   setEnabled,
-  setDisabled
+  setDisabled,
+  getCurrentTabIds
 } from './scripts/toggle.js'
 
 import {
@@ -40,38 +41,98 @@ import {
   UI_COMMAND_NOT_RECOGNIZED_ERROR
 } from './scripts/errors.js'
 
+// ---- Incognito-only mode state
+
+let incognitoTabIds = new Set();
+
+async function enterGlobalMode() {
+  chrome.tabs.onCreated.removeListener(onTabCreated);
+  chrome.tabs.onRemoved.removeListener(onTabRemoved);
+  incognitoTabIds.clear();
+  await setDisabled();
+  await setEnabled();
+}
+
+async function rebuildTabScopedRules() {
+  await setDisabled();
+  if (incognitoTabIds.size > 0) {
+    await setEnabled([...incognitoTabIds]);
+  }
+}
+
+async function enterIncognitoOnlyMode() {
+  const wins = await chrome.windows.getAll({ populate: true });
+  incognitoTabIds = new Set(
+    wins.filter(w => w.incognito).flatMap(w => w.tabs.map(t => t.id))
+  );
+  chrome.tabs.onCreated.addListener(onTabCreated);
+  chrome.tabs.onRemoved.addListener(onTabRemoved);
+  await rebuildTabScopedRules();
+}
+
+async function onTabCreated(tab) {
+  try {
+    const win = await chrome.windows.get(tab.windowId);
+    if (!win.incognito) return;
+  } catch (e) {
+    return; // window may have closed
+  }
+  incognitoTabIds.add(tab.id);
+  await rebuildTabScopedRules();
+}
+
+async function onTabRemoved(tabId) {
+  if (!incognitoTabIds.has(tabId)) return;
+  incognitoTabIds.delete(tabId);
+  await rebuildTabScopedRules();
+}
+
+async function applyMode() {
+  const { enabled, incognito_only } = await browser.storage.local.get({
+    'enabled': false,
+    'incognito_only': true
+  });
+  if (!enabled) {
+    chrome.tabs.onCreated.removeListener(onTabCreated);
+    chrome.tabs.onRemoved.removeListener(onTabRemoved);
+    incognitoTabIds.clear();
+    await setDisabled();
+    await update_extension_icon(false);
+    return;
+  }
+  if (incognito_only) {
+    await enterIncognitoOnlyMode();
+  } else {
+    await enterGlobalMode();
+  }
+}
+
 // ---- UI commands listener
 
 chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   if (VERBOSE) {
     debug_log(`onMessage: ${message}`);
   }
-  if (message == "enabled_changed") {
-    const { enabled } = await browser.storage.local.get({ 'enabled': false });
-    if (enabled) {
-      await setEnabled();
-    } else {
-      await setDisabled();
-    }
-    // when enabled status changed, inform Kagi Search extension
+  if (message == "enabled_changed" || message == "incognito_only_changed") {
+    await applyMode();
     await sendPPModeStatus();
   } else if (message == "fetch_tokens") {
     try {
-      await genTokens();
+      await genTokens(getCurrentTabIds());
     } catch (ex) {
       await logError(`${ex}<br/>Last attempt to generate tokens: ${time()}.`);
       return;
     }
   } else if (message == "set_new_search_token") {
     // the redirector was invoked, to be sure load a new token
-    await setPPHeaders(`${SCHEME}://${DOMAIN_PORT}/search`)
+    await setPPHeaders(`${SCHEME}://${DOMAIN_PORT}/search`, getCurrentTabIds())
   } else if (message == "onion_set_new_search_token") {
     // the redirector was invoked, to be sure load a new token
-    await setPPHeaders(`${ONION_SCHEME}://${ONION_DOMAIN_PORT}/search`)
+    await setPPHeaders(`${ONION_SCHEME}://${ONION_DOMAIN_PORT}/search`, getCurrentTabIds())
   } else if (message == "force_load_next_token") {
     for (let i = 0; i < REDEMPTION_ENDPOINTS.length; i++) {
       let endpoint = REDEMPTION_ENDPOINTS[i];
-      await forceLoadNextToken(endpoint);
+      await forceLoadNextToken(endpoint, getCurrentTabIds());
     }
   } else {
     await logError(UI_COMMAND_NOT_RECOGNIZED_ERROR);
@@ -81,29 +142,22 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
 // ----- code run on install
 
 chrome.runtime.onInstalled.addListener(async (details) => {
-  // in install, enable the extension and fetch some tokens
   console.log("onInstalled")
   if (details.reason == "install") {
-    await chrome.storage.local.set({ 'enabled': true });
+    await chrome.storage.local.set({ 'enabled': true, 'incognito_only': true });
     // onStart (which will be executed in approximately 1 second)
-    // will pick up 'enabled': true and use it to enable the extension
+    // will pick up these values and apply the right mode
   } else if (details.reason == "update") {
-    // if extension was enabled before receiving the oupdate,
+    // if extension was enabled before receiving the update,
     // force a disable-enable cycle in order to apply any changes
     const { enabled } = await browser.storage.local.get({ 'enabled': false });
     if (enabled) {
-      await chrome.storage.local.set({ 'enabled': false });
       await setDisabled();
-      await sendPPModeStatus();
-      await chrome.storage.local.set({ 'enabled': true });
-      await setEnabled();
+      await applyMode();
+    } else {
+      await update_extension_icon(false);
     }
-
-    // when enabled status changed, inform Kagi Search extension
     await sendPPModeStatus();
-
-    // make sure the icon extension reflects enabled/disabled
-    await update_extension_icon(enabled);
   }
 });
 
@@ -128,16 +182,14 @@ async function onStart() {
   // require writing any new code is to trigger the code used when the PP mode toggle
   // is disabled.
   const was_enabled = (await browser.storage.local.get({ 'enabled': false }))['enabled'];
-  // emulate PP mode being disabled
+  // emulate PP mode being disabled to recover any loaded tokens
   await browser.storage.local.set({ 'enabled': false })
   await setDisabled();
-  // if the extension was last enabled, simulate the PP mode toggle being enabled
+  // restore enabled state and apply the right mode
   if (was_enabled) {
     await browser.storage.local.set({ 'enabled': true })
-    await setEnabled();
   }
-  // refresh extension icon
-  await update_extension_icon(was_enabled);
+  await applyMode();
   // when coming online, send status to Kagi Search extension
   await sendPPModeStatus();
 }

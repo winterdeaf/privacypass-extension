@@ -41,10 +41,6 @@ async function unloadNextToken(endpoint) {
     if (VERBOSE) {
         // debug_log(`unloadNextToken: ${endpoint}`)
     }
-    const { enabled } = await browser.storage.local.get({ 'enabled': false });
-    if (enabled) {
-        return;
-    }
     // recover last loaded token
     const previously_loaded_token_tuple = await unsetAuthorizationHeader(endpoint);
     if (previously_loaded_token_tuple) {
@@ -56,7 +52,7 @@ async function unloadNextToken(endpoint) {
     }
 }
 
-async function loadNextToken(endpoint) {
+async function loadNextToken(endpoint, tabIds = []) {
     if (VERBOSE) {
         debug_log(`loadNextToken: ${endpoint}`)
     }
@@ -86,11 +82,11 @@ async function loadNextToken(endpoint) {
     if (next_token_tuple) {
         // found a fresh token
         // => load token in Authorization header and remove it from token list
-        await setAuthorizationHeader(endpoint, next_token_tuple);
+        await setAuthorizationHeader(endpoint, next_token_tuple, tabIds);
         const remiaining_tokens = await countTokens();
         if (remiaining_tokens <= LOW_TOKEN_COUNT) {
             if (GEN_TOKENS_ON_LOW_COUNT) { // always true, useful to set to false for debug
-                await genTokens();
+                await genTokens(tabIds);
             }
         }
     } else {
@@ -99,16 +95,16 @@ async function loadNextToken(endpoint) {
         await unsetAuthorizationHeader(endpoint);
         await setNoTokensRedirect(endpoint);
         if (GEN_TOKENS_ON_ZERO_COUNT) { // always true, useful to set to false for debug
-            await genTokens();
+            await genTokens(tabIds);
         }
     }
 }
 
-async function forceLoadNextToken(endpoint) {
+async function forceLoadNextToken(endpoint, tabIds = []) {
     const { enabled } = await browser.storage.local.get({ 'enabled': false });
     if (enabled) {
         // extension is enabled, simply call loadNextToken
-        await setPPHeaders(endpoint);
+        await setPPHeaders(endpoint, tabIds);
     } else {
         // extension is disabled, hence next token will be the last one in the ready_tokens list
         let { ready_tokens } = await chrome.storage.local.get({ 'ready_tokens': [] })
@@ -118,7 +114,7 @@ async function forceLoadNextToken(endpoint) {
     }
 }
 
-async function genTokens() {
+async function genTokens(tabIds = []) {
     if (VERBOSE) {
         debug_log('genTokens')
     }
@@ -147,18 +143,18 @@ async function genTokens() {
     if (enabled) {
         for (let i = 0; i < REDEMPTION_ENDPOINTS.length; i++) {
             const endpoint = REDEMPTION_ENDPOINTS[i];
-            await loadNextToken(endpoint);
+            await loadNextToken(endpoint, tabIds);
         }
     }
     await clearError();
 }
 
-async function setPPHeaders(endpoint) {
+async function setPPHeaders(endpoint, tabIds = []) {
     if (VERBOSE) {
         debug_log(`setPPHeaders: ${endpoint}`)
     }
     try {
-        await loadNextToken(endpoint);
+        await loadNextToken(endpoint, tabIds);
     } catch (ex) {
         await logError(`${ex}`);
         return;
@@ -172,7 +168,7 @@ async function unsetPPHeaders(endpoint) {
     await unloadNextToken(endpoint);
 }
 
-async function setPPHeadersListener(details) {
+async function setPPHeadersListener(details, tabIds = []) {
     if (VERBOSE) {
         debug_log(`setPPHeadersListener: ${details.statusCode} ${details.url}`)
         const remiaining_tokens = await countTokens();
@@ -182,7 +178,7 @@ async function setPPHeadersListener(details) {
     const scheme_domain_port = url.origin;
     const pathname = url.pathname; // comes with a leading /
     const endpoint = (pathname == "/" || pathname.endsWith('/html')) ? `${scheme_domain_port}${pathname}|` : `${scheme_domain_port}${pathname}`;
-    await setPPHeaders(endpoint);
+    await setPPHeaders(endpoint, tabIds);
 }
 
 export {
