@@ -1,11 +1,17 @@
 
 # Change Log
 
-## [1.0.8.1] - 2026-04-02
+## [v1.0.8-incognito.2] - 2026-04-02
+
+First public release of the Kagi Privacy Pass extension — Incognito Fork.
 
 ### Changed
 
-- Updated dependencies, added support for incognito-only mode.
+- Added support for incognito-only mode.
+- Updated privacypass-lib to use current versions of
+  [privacypass](https://github.com/raphaelrobert/privacypass) (rev 48296d41),
+  [voprf](https://github.com/facebook/voprf) (0.6.0-pre.0), and
+  [blind-rsa-signatures](https://github.com/jedisct1/rust-blind-rsa-signatures) (0.17).
 
 ## [1.0.8] - 2025-10-03
 
