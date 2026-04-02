@@ -1,6 +1,12 @@
 
 # Change Log
 
+## [1.0.8.1] - 2026-04-02
+
+### Changed
+
+- Updated dependencies, added support for incognito-only mode.
+
 ## [1.0.8] - 2025-10-03
 
 ### Changed

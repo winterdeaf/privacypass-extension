@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /home/salazar/wd/privacypass-extension -type f -not -path */node_modules/*)"
+    ]
+  }
+}

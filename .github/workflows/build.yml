@@ -1,0 +1,50 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Build extensions
+        run: bash build.sh
+
+      - name: Fix build directory ownership
+        run: sudo chown -R $(id -u):$(id -g) build/
+
+      - name: Sign Firefox extension
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          npx web-ext sign \
+            --source-dir build/firefox/unpacked_firefox \
+            --api-key "$AMO_JWT_ISSUER" \
+            --api-secret "$AMO_JWT_SECRET" \
+            --channel unlisted \
+            --artifacts-dir /tmp/signed
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: extensions
+          path: |
+            build/chrome/*.zip
+            build/firefox/*.xpi
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/chrome/*.zip
+            /tmp/signed/*.xpi

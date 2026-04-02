@@ -1,20 +1,17 @@
 #!/bin/bash
 
-# build privacypass-lib
-git submodule init && git submodule update
-bash -c "(cd privacypass-lib; DOCKER=${DOCKER} bash build.sh)"
-
-# build the extension
+set -eou pipefail
 
 DOCKERCMD=${DOCKER:-docker}
-BASENAME=kagi-privacypass-extension
 
-$DOCKERCMD container stop  ${BASENAME}-container
-$DOCKERCMD container rm    ${BASENAME}-container
-$DOCKERCMD rmi             ${BASENAME}-image
-$DOCKERCMD build --platform=linux/amd64 -t        ${BASENAME}-image .
+# build privacypass-lib
+git submodule init && git submodule update
 
-rm -rf build
-mkdir build
+$DOCKERCMD build --platform=linux/amd64 -t kagi-privacypass-lib-image privacypass-lib
+rm -rf privacypass-lib/build && mkdir -p privacypass-lib/build
+$DOCKERCMD run --rm -v "$(pwd)/privacypass-lib/build:/build" kagi-privacypass-lib-image
 
-$DOCKERCMD run -it -v ./build:/build --name ${BASENAME}-container ${BASENAME}-image
+# build the extension
+$DOCKERCMD build --platform=linux/amd64 -t kagi-privacypass-extension-image .
+rm -rf build && mkdir -p build
+$DOCKERCMD run --rm -v "$(pwd)/build:/build" kagi-privacypass-extension-image
