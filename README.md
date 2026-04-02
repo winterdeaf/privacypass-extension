@@ -2,6 +2,11 @@
 
 This repository contains the source code to the [Firefox](https://addons.mozilla.org/firefox/addon/kagi-privacy-pass/) and [Chrome](https://chromewebstore.google.com/detail/kagi-search/cdglnehniifkbagbbombnjghhcihifij) extensions for [Kagi Privacy Pass](https://blog.kagi.com/kagi-privacy-pass).
 
+## Disclaimers about this fork
+
+I wanted an [incognito-only privacy pass option in the Kagi extension](https://kagifeedback.org/d/6261-incognito-only-privacy-pass-option-in-extension/), so I asked some friendly LLMs for help.
+**Scarcely tested, works for me (TM), your PP tokens may catch fire.**
+
 ## Building using Docker
 
 To build this library, install Docker and run
