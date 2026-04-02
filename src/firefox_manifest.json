@@ -47,8 +47,12 @@
   "incognito": "spanning",
   "browser_specific_settings": {
     "gecko": {
-      "id": "privacypass@kagi.com",
-      "strict_min_version": "113.0"
+      "id": "privacypass@hjkl.space",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"],
+        "optional": []
+      }
     }
   }
 }

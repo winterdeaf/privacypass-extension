@@ -59,7 +59,11 @@ function display_status(status) {
   if (type == 'error') {
     status_msg_color.className = 'error-color'
     status_msg_type.textContent = "Error"
-    status_msg.innerHTML = msg;
+    status_msg.textContent = '';
+    msg.split(/<br\s*\/?>/i).forEach((part, i) => {
+      if (i > 0) status_msg.appendChild(document.createElement('br'));
+      status_msg.appendChild(document.createTextNode(part));
+    });
     show(status_msg_div)
   } else if (type == 'wait') {
     hide(status_msg_div)
