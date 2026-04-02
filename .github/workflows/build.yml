@@ -29,6 +29,8 @@ jobs:
             --api-secret "$AMO_JWT_SECRET" \
             --channel unlisted \
             --artifacts-dir /tmp/signed
+          VERSION=$(jq -r .version src/firefox_manifest.json)
+          mv /tmp/signed/*.xpi "/tmp/signed/kagi_privacypass_firefox_${VERSION}.xpi"
         env:
           AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
